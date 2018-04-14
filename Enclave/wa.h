@@ -157,7 +157,7 @@ char *value_repr(StackValue *v);
 uint32_t get_export_fidx(Module *m, char *name);
 void (*setup_thunk_in(uint32_t fidx))();
 bool interpret(Module *m);
-Module *load_module(char *path, Options opts);
+Module *load_module(uint32_t len, uint8_t* file_contents, char *path, Options opts);
 bool invoke(Module *m, char *entry, int argc, char **argv);
 
 #endif // of WAC_H

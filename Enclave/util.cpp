@@ -55,7 +55,7 @@ uint32_t read_uint32(uint8_t *bytes, uint32_t *pos) {
 // if result_len is not NULL, then it will be set to the string length
 char *read_string(uint8_t *bytes, uint32_t *pos, uint32_t *result_len) {
     uint32_t str_len = read_LEB(bytes, pos, 32);
-    char * str = malloc(str_len+1);
+    char * str = (char*) malloc(str_len+1);
     memcpy(str, bytes+*pos, str_len);
     str[str_len] = '\0';
     *pos += str_len;
@@ -114,7 +114,7 @@ char **split_string(char *str, int *count) {
 
     // split string and append tokens to 'res'
     while (p) {
-        res = realloc(res, sizeof(char*) * idx+1);
+        res = (char**) realloc(res, sizeof(char*) * idx+1);
         if (res == NULL) {
             return 0;
         }
@@ -125,7 +125,7 @@ char **split_string(char *str, int *count) {
 
     /* realloc one extra element for the last NULL */
 
-    res = realloc (res, sizeof(char*) * (idx+1));
+    res = (char**) realloc (res, sizeof(char*) * (idx+1));
     res[idx] = 0;
 
     if (count) { *count = idx; }

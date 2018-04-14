@@ -410,7 +410,7 @@ void find_blocks(Module *m) {
             case 0x02: // block
             case 0x03: // loop
             case 0x04: // if
-                block = acalloc(1, sizeof(Block), "Block");
+                block = (Block*) acalloc(1, sizeof(Block), "Block");
                 block->block_type = opcode;
                 block->type = get_block_type(m->bytes[pos+1]);
                 block->start_addr = pos;
@@ -672,7 +672,7 @@ bool interpret(Module *m) {
             if (DEBUG) { dump_stacks(m); }
             info("    0x%x <0x%x/%s>\n", cur_pc, opcode, OPERATOR_INFO[opcode]);
         }
-
+        //printf("going around the loop, opcode %x\n", opcode);
         switch (opcode) {
 
         //
@@ -692,6 +692,7 @@ bool interpret(Module *m) {
             push_block(m, m->block_lookup[cur_pc], m->sp);
             continue;
         case 0x04:  // if
+        {
             read_LEB(bytes, &m->pc, 32);  // ignore block type
             Block *block = m->block_lookup[cur_pc];
             push_block(m, block, m->sp);
@@ -712,6 +713,7 @@ bool interpret(Module *m) {
                 debug("      - cond: 0x%x jump to 0x%x, block: %s\n",
                        cond, m->pc, block_repr(block));
             }
+        }
             continue;
         case 0x05:  // else
             block = m->callstack[m->csp].block;
@@ -736,12 +738,14 @@ bool interpret(Module *m) {
                         "_");
                 }
                 if (m->csp == -1) {
+                                                        //printf("csp1\n");
                     // Return to top-level
                     return true;
                 } else {
                     // Keep going at return address
                 }
             } else if (block->block_type == 0x01) { // init_expr
+
                 return true;
             } else {  // Block
                 // End of block/loop/if, keep going
@@ -766,8 +770,9 @@ bool interpret(Module *m) {
             if (TRACE) { debug("      - depth: 0x%x, cond: 0x%x, to: 0x%x\n", depth, cond, m->pc); }
             continue;
         case 0x0e:  // br_table
+        {
             count = read_LEB(bytes, &m->pc, 32);
-            depths = acalloc(count, sizeof(uint32_t), "uint32_t");
+            depths = (uint32_t*) acalloc(count, sizeof(uint32_t), "uint32_t");
             for(uint32_t i=0; i<count; i++) {
                 depths[i] = read_LEB(bytes, &m->pc, 32);
             }
@@ -785,6 +790,7 @@ bool interpret(Module *m) {
             if (TRACE) {
                 debug("      - count: %d, didx: %d, to: 0x%x\n", count, didx, m->pc);
             }
+        }
             continue;
         case 0x0f:  // return
             while (m->csp >= 0 &&
@@ -824,9 +830,9 @@ bool interpret(Module *m) {
                 // pointer size) so get the actual (sized) index
                 if (TRACE) {
                     debug("      - entries: %p, original val: 0x%x, new val: 0x%x\n",
-                        m->table.entries, val, (uint32_t)m->table.entries - val);
+                        m->table.entries, val, m->table.entries - (uint32_t*)val);
                 }
-                val = val - (uint32_t)m->table.entries;
+                val = (uint32_t*)val - m->table.entries;
             }
             if (val < 0 || val >= m->table.maximum) {
                 snprintf(exception, 1024, "undefined element 0x%x", val);
@@ -934,6 +940,7 @@ bool interpret(Module *m) {
             stack[m->sp].value.uint32 = m->memory.pages;
             continue;
         case 0x40:  // grow_memory
+        {
             read_LEB(bytes, &m->pc, 32); // ignore reserved
             uint32_t prev_pages = m->memory.pages;
             uint32_t delta = stack[m->sp].value.uint32;
@@ -945,11 +952,12 @@ bool interpret(Module *m) {
                 continue;
             }
             m->memory.pages += delta;
-            m->memory.bytes = arecalloc(m->memory.bytes,
+            m->memory.bytes = (uint8_t*) arecalloc(m->memory.bytes,
                                         prev_pages*pow(2,16),
                                         m->memory.pages*pow(2,16),
                                         sizeof(uint32_t),
                                         "Module->memory.bytes");
+        }
             continue;
 
         // Memory load operators
@@ -1020,6 +1028,7 @@ bool interpret(Module *m) {
 
         // Memory store operators
         case 0x36 ... 0x3e:
+        {
             flags = read_LEB(bytes, &m->pc, 32);
             offset = read_LEB(bytes, &m->pc, 32);
             StackValue *sval = &stack[m->sp--];
@@ -1057,6 +1066,7 @@ bool interpret(Module *m) {
             case 0x3d: memcpy(maddr, &sval->value.uint64, 2); break; // i64.store16
             case 0x3e: memcpy(maddr, &sval->value.uint64, 4); break; // i64.store32
             }
+        }
             continue;
 
         //
@@ -1495,7 +1505,9 @@ void run_init_expr(Module *m, uint8_t type, uint32_t *pc) {
 
 uint32_t get_export_fidx(Module *m, char *name) {
     // Find name function index
+    //printf("here\n");
     for (uint32_t f=0; f<m->function_count; f++) {
+        //printf("and here\n");
         char *fname = m->functions[f].export_name;
         if (!fname) { continue; }
         if (strncmp(name, fname, 1024) == 0) {
@@ -1505,16 +1517,15 @@ uint32_t get_export_fidx(Module *m, char *name) {
     return -1;
 }
 
-Module *load_module(char *path, Options options) {
-
+Module *load_module(uint32_t len, uint8_t* file_contents, char *path, Options options) {
     uint32_t  mod_len;
-    uint8_t  *bytes = "";
+    uint8_t  *bytes;
     uint8_t   vt;
     uint32_t  pos = 0, word;
     Module   *m;
 
     // Allocate the module
-    m = acalloc(1, sizeof(Module), "Module");
+    m = (Module*) acalloc(1, sizeof(Module), "Module");
     m->path = path;
     m->options = options;
 
@@ -1525,10 +1536,12 @@ Module *load_module(char *path, Options options) {
 
     // open and mmap the WASM module
     //bytes = mmap_file(path, &mod_len);
-    map_file(bytes, path, &mod_len);
+    //map_file(bytes, path, &mod_len);
+    bytes = file_contents;
+    mod_len = len;
     m->byte_count = mod_len;
     m->bytes = bytes;
-    m->block_lookup = acalloc(m->byte_count, sizeof(Block *),
+    m->block_lookup = (Block**) acalloc(m->byte_count, sizeof(Block *),
                                 "function->block_lookup");
     m->start_function = -1;
 
@@ -1536,11 +1549,11 @@ Module *load_module(char *path, Options options) {
     pos = 0;
     memcpy(&word, &bytes[0], 4);
     //word = read_uint32(bytes, &pos);printf("checkpoint\n");
-    ASSERT(word == WA_MAGIC, "Wrong module magic 0x%x %x %d\n", word, &bytes[0], strlen(bytes));
+    ASSERT(word == WA_MAGIC, "Wrong module magic 0x%x %x %x\n", word, bytes[0], WA_MAGIC);
     //word = read_uint32(bytes, &pos);
     memcpy(&word, &bytes[4], 4);
-    ASSERT(word == WA_VERSION, "Wrong module version 0x%x\n", word);
-    pos = 12;
+    ASSERT(word == WA_VERSION, "Wrong module version 0x%x %x\n", word, WA_VERSION);
+    pos = 8;
 
     // Read the sections
     while (pos < mod_len) {
@@ -1550,6 +1563,7 @@ Module *load_module(char *path, Options options) {
         debug("Reading section %d at 0x%x, length %d\n", id, pos, slen);
         switch (id) {
         case 0:
+        {
             warn("Parsing Custom(0) section (length: 0x%x)\n", slen);
             uint32_t end_pos = pos+slen;
             char *name = read_string(bytes, &pos, NULL);
@@ -1563,24 +1577,26 @@ Module *load_module(char *path, Options options) {
                 error("Ignoring unknown custom section '%s'\n", name);
             }
             pos = end_pos;
-            break;
+        }
+        break;
         case 1:
+        {
             warn("Parsing Type(1) section (length: 0x%x)\n", slen);
             m->type_count = read_LEB(bytes, &pos, 32);
-            m->types = acalloc(m->type_count, sizeof(Type),
+            m->types = (Type*) acalloc(m->type_count, sizeof(Type),
                                  "Module->types");
 
             for (uint32_t c=0; c<m->type_count; c++) {
                 Type *type = &m->types[c];
                 type->form = read_LEB(bytes, &pos, 7);
                 type->param_count = read_LEB(bytes, &pos, 32);
-                type->params = acalloc(type->param_count, sizeof(uint32_t),
+                type->params = (uint32_t*) acalloc(type->param_count, sizeof(uint32_t),
                                       "type->params");
                 for (uint32_t p=0; p<type->param_count; p++) {
                     type->params[p] = read_LEB(bytes, &pos, 32);
                 }
                 type->result_count = read_LEB(bytes, &pos, 32);
-                type->results = acalloc(type->result_count, sizeof(uint32_t),
+                type->results = (uint32_t*) acalloc(type->result_count, sizeof(uint32_t),
                                        "type->results");
                 for (uint32_t r=0; r<type->result_count; r++) {
                     type->results[r] = read_LEB(bytes, &pos, 32);
@@ -1588,8 +1604,10 @@ Module *load_module(char *path, Options options) {
                 debug("  form: 0x%x, params: %d, results: %d\n",
                       type->form, type->param_count, type->result_count);
             }
+        }
             break;
         case 2:
+        {
             warn("Parsing Import(2) section (length: 0x%x)\n", slen);
             uint32_t import_count = read_LEB(bytes, &pos, 32);
             for (uint32_t gidx=0; gidx<import_count; gidx++) {
@@ -1619,7 +1637,8 @@ Module *load_module(char *path, Options options) {
                 }
 
                 void *val;
-                char *err, *sym = malloc(module_len + field_len + 5);
+                char *err;
+                char *sym = (char*) malloc(module_len + field_len + 5);
 
                 do {
                     // Try using module as handle filename
@@ -1657,10 +1676,11 @@ Module *load_module(char *path, Options options) {
                 // Store in the right place
                 switch (external_kind) {
                 case 0x00:  // Function
+                {/* just removing this and hoping it works out...
                     fidx = m->function_count;
                     m->import_count += 1;
                     m->function_count += 1;
-                    m->functions = arecalloc(m->functions,
+                    m->functions = (Block*) arecalloc(m->functions,
                                            fidx, m->import_count,
                                            sizeof(Block), "Block(imports)");
 
@@ -1672,12 +1692,13 @@ Module *load_module(char *path, Options options) {
                         func->import_module, func->import_field, fidx,
                         type_index);
 
-                    func->func_ptr = val;
+                    func->func_ptr = val;*/
+                }
                     break;
                 case 0x01:  // Table
                     ASSERT(!m->table.entries,
                            "More than 1 table not supported\n");
-                    m->table.entries = val;
+                    m->table.entries = (uint32_t*)val;
                     warn("  setting table.entries to: %p\n", *(uint32_t **)val);
                     m->table.entries = *(uint32_t **)val;
                     break;
@@ -1688,8 +1709,9 @@ Module *load_module(char *path, Options options) {
                     m->memory.bytes = *(uint8_t **)val;
                     break;
                 case 0x03:  // Global
+                {
                     m->global_count += 1;
-                    m->globals = arecalloc(m->globals,
+                    m->globals = (StackValue*) arecalloc(m->globals,
                                            m->global_count-1, m->global_count,
                                            sizeof(StackValue), "globals");
                     StackValue *glob = &m->globals[m->global_count-1];
@@ -1703,21 +1725,24 @@ Module *load_module(char *path, Options options) {
                     }
                     debug("    setting global %d (content_type %d) to %p: %s\n",
                            m->global_count-1, content_type, val, value_repr(glob));
+                }
                     break;
                 default:
                     FATAL("Import of kind %d not supported\n", external_kind);
                 }
 
             }
+        }
             break;
         case 3:
+        {
             warn("Parsing Function(3) section (length: 0x%x)\n", slen);
             m->function_count += read_LEB(bytes, &pos, 32);
             debug("  import_count: %d, new count: %d\n",
                   m->import_count, m->function_count);
 
             Block *functions;
-            functions = acalloc(m->function_count, sizeof(Block),
+            functions = (Block*) acalloc(m->function_count, sizeof(Block),
                                 "Block(function)");
             if (m->import_count != 0) {
                 memcpy(functions, m->functions, sizeof(Block)*m->import_count);
@@ -1731,8 +1756,10 @@ Module *load_module(char *path, Options options) {
                 debug("  function fidx: 0x%x, tidx: 0x%x\n",
                       f, tidx);
             }
+        }
             break;
         case 4:
+        {
             warn("Parsing Table(4) section\n");
             uint32_t table_count = read_LEB(bytes, &pos, 32);
             debug("  table count: 0x%x\n", table_count);
@@ -1741,12 +1768,14 @@ Module *load_module(char *path, Options options) {
             // Allocate the table
             //for (uint32_t c=0; c<table_count; c++) {
             parse_table_type(m, &pos);
-            m->table.entries = acalloc(m->table.size,
+            m->table.entries = (uint32_t*) acalloc(m->table.size,
                                        sizeof(uint32_t),
                                        "Module->table.entries");
             //}
+        }
             break;
         case 5:
+        {
             warn("Parsing Memory(5) section\n");
             uint32_t memory_count = read_LEB(bytes, &pos, 32);
             debug("  memory count: 0x%x\n", memory_count);
@@ -1755,12 +1784,14 @@ Module *load_module(char *path, Options options) {
             // Allocate memory
             //for (uint32_t c=0; c<memory_count; c++) {
             parse_memory_type(m, &pos);
-            m->memory.bytes = acalloc(m->memory.pages*pow(2,16),
+            m->memory.bytes = (uint8_t*) acalloc(m->memory.pages*pow(2,16),
                                     sizeof(uint32_t),
                                     "Module->memory.bytes");
             //}
+        }
             break;
         case 6:
+        {
             warn("Parsing Global(6) section\n");
             uint32_t global_count = read_LEB(bytes, &pos, 32);
             for (uint32_t g=0; g<global_count; g++) {
@@ -1769,7 +1800,7 @@ Module *load_module(char *path, Options options) {
                 uint8_t mutability = read_LEB(bytes, &pos, 1);
                 uint32_t gidx = m->global_count;
                 m->global_count += 1;
-                m->globals = arecalloc(m->globals, gidx, m->global_count,
+                m->globals = (StackValue*) arecalloc(m->globals, gidx, m->global_count,
                                         sizeof(StackValue), "globals");
                 m->globals[gidx].value_type = type;
 
@@ -1779,8 +1810,10 @@ Module *load_module(char *path, Options options) {
                 m->globals[gidx] = m->stack[m->sp--];
             }
             pos = start_pos+slen;
+        }
             break;
         case 7:
+        {
             warn("Parsing Export(7) section (length: 0x%x)\n", slen);
             uint32_t export_count = read_LEB(bytes, &pos, 32);
             for (uint32_t e=0; e<export_count; e++) {
@@ -1797,12 +1830,16 @@ Module *load_module(char *path, Options options) {
                 m->functions[index].export_name = name;
                 debug("  export: %s (0x%x)\n", name, index);
             }
+        }
             break;
         case 8:
+        {
             warn("Parsing Start(8) section (length: 0x%x)\n", slen);
             m->start_function = read_LEB(bytes, &pos, 32);
+        }
             break;
         case 9:
+        {
             warn("Parsing Element(9) section (length: 0x%x)\n", slen);
             uint32_t element_count = read_LEB(bytes, &pos, 32);
 
@@ -1819,8 +1856,8 @@ Module *load_module(char *path, Options options) {
                     // offset is the table address + the index (not sized for the
                     // pointer size) so get the actual (sized) index
                     debug("   origin offset offset: 0x%x, new offset: 0x%x\n",
-                          offset, offset - (uint32_t)m->table.entries);
-                    offset = offset - (uint32_t)m->table.entries;
+                          offset, (uint32_t*)offset - m->table.entries);
+                    offset = (uint32_t*)offset - m->table.entries;
                 }
 
                 uint32_t num_elem = read_LEB(bytes, &pos, 32);
@@ -1837,9 +1874,11 @@ Module *load_module(char *path, Options options) {
                 }
             }
             pos = start_pos+slen;
+        }
             break;
         // 9 and 11 are similar so keep them together, 10 is below 11
         case 11:
+        {
             warn("Parsing Data(11) section (length: 0x%x)\n", slen);
             uint32_t seg_count = read_LEB(bytes, &pos, 32);
             for (uint32_t s=0; s<seg_count; s++) {
@@ -1863,9 +1902,10 @@ Module *load_module(char *path, Options options) {
                 memcpy(m->memory.bytes+offset, bytes+pos, size);
                 pos += size;
             }
-
+        }
             break;
         case 10:
+        {
             warn("Parsing Code(10) section (length: 0x%x)\n", slen);
             uint32_t body_count = read_LEB(bytes, &pos, 32);
             for (uint32_t b=0; b<body_count; b++) {
@@ -1885,7 +1925,7 @@ Module *load_module(char *path, Options options) {
                     function->local_count += lecount;
                     tidx =  read_LEB(bytes, &pos, 7);
                 }
-                function->locals = acalloc(function->local_count,
+                function->locals = (uint32_t*) acalloc(function->local_count,
                                            sizeof(uint32_t),
                                            "function->locals");
 
@@ -1907,6 +1947,7 @@ Module *load_module(char *path, Options options) {
                        "Code section did not end with 0x0b\n");
                 pos = function->end_addr + 1;
             }
+        }
             break;
         default:
             FATAL("Section %d unimplemented\n", id);
@@ -1948,6 +1989,8 @@ Module *load_module(char *path, Options options) {
     // This global is used by setup_thunk_in since signal handlers don't have
     // a way to pass arguments when they are setup.
     _wa_current_module_ = m;
+    
+    //printf("mm %d\n", m->function_count);
 
     return m;
 }
@@ -1962,7 +2005,7 @@ bool invoke(Module *m, char *entry, int argc, char **argv) {
     // Find entry function index
     if (entry) {
         fidx = get_export_fidx(m, entry);
-    }
+    }//printf("woo!\n");
     if (fidx == -1) {
         entry = "main";
         fidx = get_export_fidx(m, entry);

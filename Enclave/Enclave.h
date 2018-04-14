@@ -44,9 +44,9 @@ extern "C" {
 #endif
 
 void printf(const char *fmt, ...);
-void map_file(uint8_t *bytes, char *path,uint32_t *len);
-int ecall_invoke(bool *b, Module *m, char *entry, int argc, char **argv);
-int ecall_load_module(Module *m, char *path, Options opts);
+//int ecall_invoke(bool *b, Module *m, char *entry, int argc, char **argv);
+//int ecall_load_module(uint32_t len, uint8_t* file_contents, Module *m, char *path, Options opts);
+int ecall_load_invoke_allInOne(uint32_t len, uint8_t* file_contents, char *path, Options opts, bool *b, char *entry, int argc, char **argv,  char *output);
 size_t get_module_size(const Module *m);
 
 #if defined(__cplusplus)

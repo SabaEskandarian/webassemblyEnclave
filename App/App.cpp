@@ -238,20 +238,6 @@ void ocall_print_string(const char *str)
     printf("%s", str);
 }
 
-void ocall_mmap_file(uint8_t *bytes, char *path, uint32_t *len){
-    printf("mapping file\n");fflush(stdout);
-    FILE *f = fopen(path, "rb");
-    fseek(f, 0, SEEK_END);
-    *len = ftell(f);
-    fseek(f, 0, SEEK_SET);  //same as rewind(f);
-
-    bytes = (uint8_t*)malloc(*len + 1);
-    fread(bytes, *len, 1, f);
-    fclose(f);
-
-    bytes[*len] = 0;printf("mapping file %x %d\n", &bytes[0], *len);fflush(stdout);
-}
-
 // open and mmap a file
 /* Move this functionality out of enclave via ocall
 uint8_t *mmap_file(char *path, uint32_t *len) {
@@ -298,16 +284,6 @@ char **split_string(char *str, int *count) {
 
     if (count) { *count = idx; }
     return res;
-}
-
-char* value_repr(char *value, StackValue *v) {
-    switch (v->value_type) {
-    case I32: snprintf(value, 255, "0x%x:i32",  v->value.uint32); break;
-    case I64: snprintf(value, 255, "0x%llx:i64", v->value.uint64); break;
-    case F32: snprintf(value, 255, "%.7g:f32",  v->value.f32);    break;
-    case F64: snprintf(value, 255, "%.7g:f64",  v->value.f64);    break;
-    }
-    return value;
 }
 
 void usage(char *prog) {
@@ -369,18 +345,41 @@ int SGX_CDECL main(int argc, char *argv[])
     Options opts;
     Module *m;
     //Module *m = load_module(mod_path, opts);
-    ecall_load_module(enclave_id, (int*)&status, m, mod_path, opts);
-    printf("here");fflush(stdout);
+    uint8_t  *bytes;
+    uint32_t *len;
 
-    char value_str[256];
+    FILE *f = fopen(mod_path, "rb");
+    fseek(f, 0, SEEK_END);
+    len = (uint32_t*)malloc(sizeof(uint32_t));
+    int t = ftell(f);
+    memcpy(len, &t, 4);
+    //*len = ftell(f);
+    fseek(f, 0, SEEK_SET);  //same as rewind(f);
+    bytes = (uint8_t*)malloc(*len);
+    fread(bytes, *len, 1, f);
+    fclose(f);
+    //printf("here");fflush(stdout);
+    //uint8_t *bytes, char *path, uint32_t *len
+    //ecall_load_module(enclave_id, (int*)&status, *len, bytes,  m, mod_path, opts);
+    //printf("ladeda\n");fflush(stdout);
+    //printf("here in app.cpp %d\n", m->function_count);fflush(stdout);
+
+    //char value_str[256];
+    char *output = (char*)malloc(256*sizeof(char));
+    memset(output, '\0', 1);
     if (!repl) {
         // Invoke one function and exit
         //res = invoke(m, argv[optind], argc-optind-1, argv+optind+1);
-        ecall_invoke(enclave_id, (int*)&status, (bool*)&res, m, argv[optind], argc-optind-1, argv+optind+1);
+        //printf("here");fflush(stdout);
+        //ecall_invoke(enclave_id, (int*)&status, (bool*)&res, m, argv[optind], argc-optind-1, argv+optind+1);
+        //printf("here");fflush(stdout);
+        ecall_load_invoke_allInOne(enclave_id, (int*)&status, *len, bytes, mod_path, opts, (bool*)&res, argv[optind], argc-optind-1, argv+optind+1, output);
+
         if (res) {
-	    if (m->sp >= 0) {
-		printf("%s\n", value_repr(value_str, &m->stack[m->sp]));
-	    }
+                    printf("%s\n", output);
+	    //if (m->sp >= 0) {
+		//printf("%s\n", value_repr(value_str, &m->stack[m->sp]));
+	    //}
         } else {
 	    //error("Exception: %s\n", exception); removing these since we don't have the global exception available outside the enclave 
         printf("Exception\n");
@@ -390,20 +389,25 @@ int SGX_CDECL main(int argc, char *argv[])
         // Simple REPL
         if (optind < argc) { usage(argv[0]); }
         while (line = readline("webassembly> ")) {
+            memset(output, '\0', 1);
             int token_cnt = 0;
             char **tokens = split_string(line, &token_cnt);
             if (token_cnt == 0) { continue; }
 
             // Reset the stacks
-            m->sp = -1;
+            /*m->sp = -1;
             m->fp = -1;
-            m->csp = -1;
+            m->csp = -1;*/
             //res = invoke(m, tokens[0], token_cnt-1, tokens+1);
-            ecall_invoke(enclave_id, (int*)&status, (bool*)&res, m, tokens[0], token_cnt-1, tokens+1);
+            //ecall_invoke(enclave_id, (int*)&status, (bool*)&res, m, tokens[0], token_cnt-1, tokens+1);
+            ecall_load_invoke_allInOne(enclave_id, (int*)&status, *len, bytes, mod_path, opts, (bool*)&res, argv[optind], argc-optind-1, argv+optind+1, output);
+
 	    if (res) {
-		if (m->sp >= 0) {
-		    printf("%s\n", value_repr(value_str, &m->stack[m->sp]));
-		}
+            printf("%s\n", output);
+
+		//if (m->sp >= 0) {
+		//    printf("%s\n", value_repr(value_str, &m->stack[m->sp]));
+		//}
 	    } else {
 		//error("Exception: %s\n", exception);
         printf("Exception\n");
